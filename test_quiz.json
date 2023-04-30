@@ -27,6 +27,7 @@
   "metadata": {
     "id": "test_quiz",
     "name": "Test Quiz",
+    "desc": "This is a test quiz.",
     "author": ["UserA", "UserB"]
   }
 }
