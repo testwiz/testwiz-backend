@@ -5,6 +5,10 @@ import { formatString } from './utils/formatString';
 export const newTableFromQuiz = (data) => {
   let quizSQLParams: string = '';
 
+  if (data.metadata.needsAuth) {
+    quizSQLParams = 'username TEXT, email TEXT, ';
+  }
+
   data.quiz.forEach((q) => {
     if (q.type != 'text') {
       quizSQLParams += `${q.id} TEXT, `;

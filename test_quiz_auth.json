@@ -25,10 +25,10 @@
     }
   ],
   "metadata": {
-    "id": "test_quiz",
-    "name": "Test Quiz",
-    "desc": "This is a test quiz.",
+    "id": "test_quiz_auth",
+    "name": "Test Quiz (AUTH)",
+    "desc": "This is a test quiz. (AUTH)",
     "author": "UserA, UserB",
-    "needsAuth": false
+    "needsAuth": true
   }
 }
