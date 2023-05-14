@@ -321,19 +321,13 @@ webApp.post('/accounts/register', async (req, res) => {
   }
 });
 
-webApp.post(
-  '/accounts/login',
-  passport.authenticate('basic', { session: false }),
-  async (req, res) => {
-    if (req.body.username && req.body.password) {
-      res
-        .status(200)
-        .end(await loginUser(req.body.username, req.body.password));
-    } else {
-      res.status(422).end('BAD DATA');
-    }
+webApp.post('/accounts/login', async (req, res) => {
+  if (req.body.username && req.body.password) {
+    res.status(200).end(await loginUser(req.body.username, req.body.password));
+  } else {
+    res.status(422).end('BAD DATA');
   }
-);
+});
 
 webApp.get('/session/exists', (req, res) => {
   if (req.query.session) {
