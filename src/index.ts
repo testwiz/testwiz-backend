@@ -350,6 +350,17 @@ webApp.get('/session/exists', (req, res) => {
   }
 });
 
+webApp.get('/accounts/exists/:username', (req, res) => {
+  DBConnection()
+    .promise()
+    .query(
+      formatString(SQLQueries.USERNAME_EXITS, [
+        { key: 'user', value: req.params.username },
+      ])
+    )
+    .then((val) => res.status(200).json(JSON.parse(JSON.stringify(val))[0][0]));
+});
+
 // Server
 webApp.listen(process.env.PORT || 3000, () => {
   console.log(`Express Server running on port, ${process.env.PORT || 3000}`);

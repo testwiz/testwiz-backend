@@ -27,4 +27,5 @@ export const SQLQueries = {
   SEARCH_QUIZZES_AUTH: "SELECT * FROM quizzes WHERE name LIKE '%searchParam%'",
   GET_USER_BY_USERNAME: "SELECT * FROM users WHERE username = '%user%'",
   GET_SESSION: "SELECT * FROM sessions WHERE session = '%session%'",
+  USERNAME_EXITS: "SELECT 'Taken' FROM users WHERE username = '%user%'",
 };
