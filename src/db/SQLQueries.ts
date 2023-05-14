@@ -21,7 +21,7 @@ export const SQLQueries = {
   DECREASE_SESSIONS: 'UPDATE sessions SET expire=expire-60000',
   DELETE_EXPIRED_SESSIONS: 'DELETE FROM sessions WHERE expire < 1',
   CREATE_SESSION:
-    "INSERT INTO sessions (username, email, session, type, expire) VALUES ('%user%', '%email%', '%session%', %type%, %expire%)",
+    "INSERT INTO sessions (username, email, session, type, expire) VALUES ('%user%', '%email%', '%session%', '%type%', %expire%)",
   SEARCH_QUIZZES:
     "SELECT * FROM quizzes WHERE needsAuth = 'false' AND name LIKE '%searchParam%'",
   SEARCH_QUIZZES_AUTH: "SELECT * FROM quizzes WHERE name LIKE '%searchParam%'",
