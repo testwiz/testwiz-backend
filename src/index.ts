@@ -1,364 +1,275 @@
+// hiii - sonicx180
+
 import express from 'express';
 import CORS from 'cors';
 import passport from 'passport';
 import bodyParser from 'body-parser';
 import lzs from 'lz-string';
-import cron from 'node-cron';
-import { DBConnection } from './db/DBConn';
+import corn from 'node-cron';
+import corn_parser from 'cron-parser';
+
 import { BasicStrategy } from 'passport-http';
-import { SQLQueries } from './db/SQLQueries';
-import { formatString } from './utils/formatString';
-import { newTableFromQuiz } from './NewQuiz';
 import {
-  getSessionEmail,
-  getSessionUsername,
-  isSession,
-  refreshSessions,
-} from './session/Sessions';
-import { SessionType } from './session/SessionType';
-import { loginUser, registerUser } from './auth/Users';
+  SessionType,
+  Sessions,
+  getUserSession,
+  sessionValid,
+} from './sessions/Sessions';
+import { SupaBaseClient } from './SupaBase/SupaBase';
+import { register } from './accounts/register';
+import { login } from './accounts/login';
+import { newTableFromQuiz } from './quizzes/createQuiz';
 
-// Variables
-const webApp = express();
-
-// Init
+// Config
 require('dotenv').config();
-webApp.use(CORS());
-webApp.use(bodyParser.json());
+
+// Web Server Init
+const app = express();
+app.use(CORS());
+app.use(bodyParser.json());
+
+// Authentication
 passport.use(
   new BasicStrategy(async (username, password, done) => {
     if (
-      username == process.env.ENCRYPTION_BASIC_USER &&
-      password == process.env.ENCRYPTION_BASIC_PASS
+      (username == process.env.ADMIN_USER &&
+        password == process.env.ADMIN_PASS) ||
+      getUserSession(username).get('session') == password
     ) {
       return done(null, username);
     } else {
-      const user = (await getUserFromDB(username, password)) as [any];
-      if (String(user.length) !== '0') {
-        done(null, username);
-      } else {
-        return done(null, false);
-      }
+      return done(null, false);
     }
   })
 );
 
-// DB Init
-DBConnection().query(SQLQueries.CREATE_QUIZZES_TABLE, (err) => {
-  if (err) {
-    console.log(err.code);
+// Cron
+const sessionClearCron = corn.schedule(
+  process.env.CRON_SESSION_CLEAR,
+  () => (Sessions.length = 0)
+); // Delete sessions
+
+// Unauthed
+app.get('/', (_, res) => res.status(200).end('Server is Live!'));
+
+app.get('/quiz/:id', async (req, res) => {
+  const { data } = await SupaBaseClient.from('quizzes')
+    .select()
+    .eq('quizid', req.params.id)
+    .single();
+
+  res.status(200).json(data);
+});
+
+app.get('/quizzes', async (_, res) => {
+  let { data } = await SupaBaseClient.from('quizzes')
+    .select()
+    .eq('needs_auth', false);
+
+  res.status(200).json(data);
+});
+
+app.get('/quizzes/search/', async (req, res) => {
+  if (req.query.search) {
+    const { data } = await SupaBaseClient.from('quizzes')
+      .select()
+      .eq('needs_auth', false)
+      .textSearch('name', `'${req.query.search}'`);
+
+    res.status(200).json(data);
+  } else {
+    res.status(400).end('Search Missing');
   }
 });
 
-DBConnection().query(SQLQueries.CREATE_USERS_TABLE, (err) => {
-  if (err) {
-    console.log(err.code);
-  }
+app.post('/submit/quiz/:id', async (req, res) => {
+  await SupaBaseClient.from(req.params.id).insert(req.body);
+  res.status(200).end('Submited!');
 });
 
-DBConnection().query(SQLQueries.CREATE_SESSION_TABLE, (err) => {
-  if (err) {
-    console.log(err.code);
-  }
-});
-
-// Methods
-const getUserFromDB = (username: string, password: string) => {
-  return new Promise((resolve) => {
-    DBConnection().query(
-      formatString(SQLQueries.GET_USER, [
-        {
-          key: 'user',
-          value: username,
-        },
-        {
-          key: 'pass',
-          value: password,
-        },
-      ]),
-      (_, vals) => {
-        resolve(JSON.parse(JSON.stringify(vals)));
-      }
-    );
-  });
-};
-
-webApp.get('/', (_, res) => {
-  res.status(200).end('Server is active!');
-});
-
-webApp.get('/quiz/:quizID', (req, res) => {
-  DBConnection().query(
-    formatString(SQLQueries.SELECT_QUIZ, [
-      { key: 'id', value: req.params.quizID },
-    ]),
-    (_, val) => {
-      res.status(200).json(val);
-    }
-  );
-});
-
-webApp.get('/quizzes', (_, res) => {
-  DBConnection().query(SQLQueries.SELECT_ALL_QUIZZES, (_, val) => {
-    res.status(200).json(val);
-  });
-});
-
-webApp.get('/quizzes/search/:search', (req, res) => {
-  DBConnection().query(
-    formatString(SQLQueries.SEARCH_QUIZZES, [
-      { key: 'searchParam', value: `%${req.params.search}%` },
-    ]),
-    (_, val) => {
-      res.status(200).json(val);
-    }
-  );
-});
-
-webApp.get(
-  '/quizzes/auth',
-  passport.authenticate('basic', { session: false }),
-  (req, res) => {
-    if (
-      req.query.session &&
-      isSession(String(req.query.session), SessionType.BASIC)
-    ) {
-      DBConnection().query(SQLQueries.SELECT_ALL_QUIZZES_AUTH, (_, val) => {
-        res.status(200).json(val);
-      });
-    } else {
-      res.status(422).end('BAD DATA!');
-    }
-  }
+app.get('/sessions/expires', (_, res) =>
+  res.status(200).json({
+    expires: corn_parser
+      .parseExpression(process.env.CRON_SESSION_CLEAR)
+      .next()
+      .toDate()
+      .toUTCString(),
+  })
 );
 
-webApp.get(
-  '/quizzes/search/:search/auth',
-  passport.authenticate('basic', { session: false }),
-  (req, res) => {
-    if (
-      req.query.session &&
-      isSession(String(req.query.session), SessionType.BASIC)
-    ) {
-      DBConnection().query(
-        formatString(SQLQueries.SEARCH_QUIZZES_AUTH, [
-          { key: 'searchParam', value: `%${req.params.search}%` },
-        ]),
-        (_, val) => {
-          res.status(200).json(val);
-        }
-      );
-    } else {
-      res.status(422).end('BAD DATA!');
-    }
+app.get('/accounts/exists/username', async (req, res) => {
+  if (req.query.username) {
+    const { data } = await SupaBaseClient.from('users')
+      .select()
+      .eq('username', req.query.username)
+      .single();
+
+    res.status(200).json({ exists: data == null ? false : true });
+  } else {
+    res.status(400).end('Username not entered');
   }
-);
-
-webApp.post('/submitQuiz/:quizID', (req, res) => {
-  let keys: string = '';
-  let values: string = '';
-
-  Object.keys(req.body).forEach((e) => {
-    keys += `${e}, `;
-    values += `'${req.body[e]}', `;
-  });
-
-  keys = keys.slice(0, -2);
-  values = values.slice(0, -2);
-
-  DBConnection().query(
-    formatString(SQLQueries.INSERT_ANSWERS, [
-      {
-        key: 'id',
-        value: req.params.quizID,
-      },
-      {
-        key: 'keys',
-        value: keys,
-      },
-      {
-        key: 'values',
-        value: values,
-      },
-    ])
-  );
-
-  res.status(200).end('OK!');
 });
 
-webApp.post(
-  '/submitQuiz/:quizID/auth',
-  passport.authenticate('basic', { session: false }),
-  async (req, res) => {
-    if (
-      req.query.session &&
-      isSession(String(req.query.session), SessionType.BASIC)
-    ) {
-      let keys: string = 'username, email, ';
-      let values: string = `'${await getSessionUsername(
-        ''
-      )}', '${await getSessionEmail('')}', `;
+app.get('/quizzes/exists/quiz', async (req, res) => {
+  if (req.query.quizid) {
+    const { data } = await SupaBaseClient.from('quizzes')
+      .select()
+      .eq('quizid', req.query.quizid)
+      .single();
 
-      Object.keys(req.body).forEach((e) => {
-        keys += `${e}, `;
-        values += `'${req.body[e]}', `;
-      });
-
-      keys = keys.slice(0, -2);
-      values = values.slice(0, -2);
-
-      DBConnection().query(
-        formatString(SQLQueries.INSERT_ANSWERS, [
-          {
-            key: 'id',
-            value: req.params.quizID,
-          },
-          {
-            key: 'keys',
-            value: keys,
-          },
-          {
-            key: 'values',
-            value: values,
-          },
-        ])
-      );
-
-      res.status(200).end('OK!');
-    } else {
-      res.status(403).end('Unauthorised OR BAD DATA');
-    }
+    res.status(200).json({ exists: data == null ? false : true });
+  } else {
+    res.status(400).end('QuizID not entered');
   }
-);
+});
 
-webApp.post(
-  '/newQuiz',
-  passport.authenticate('basic', { session: false }),
-  (req, res) => {
-    if (
-      req.query.session &&
-      isSession(String(req.query.session), SessionType.CREATOR)
-    ) {
-      let quizID: string = JSON.parse(
-        lzs.decompressFromBase64(String(req.body.data))
-      ).metadata.id;
-
-      let needsAuth: string = JSON.parse(
-        lzs.decompressFromBase64(String(req.body.data))
-      ).metadata.needsAuth;
-
-      let name: string = JSON.parse(
-        lzs.decompressFromBase64(String(req.body.data))
-      ).metadata.name;
-
-      newTableFromQuiz(
-        JSON.parse(lzs.decompressFromBase64(String(req.body.data)))
-      );
-
-      DBConnection().query(
-        formatString(SQLQueries.INSERT_QUIZ, [
-          {
-            key: 'quizID',
-            value: quizID,
-          },
-          {
-            key: 'name',
-            value: name,
-          },
-          {
-            key: 'needsAuth',
-            value: String(needsAuth),
-          },
-          {
-            key: 'data',
-            value: req.body.data,
-          },
-        ])
-      );
-
-      res.status(200).end('OK!');
-    } else {
-      res.status(403).end('Unauthorised');
-    }
-  }
-);
-
-webApp.delete(
-  '/deleteQuiz/:quizID',
-  passport.authenticate('basic', { session: false }),
-  (req, res) => {
-    if (
-      req.query.session &&
-      isSession(String(req.query.session), SessionType.ADMIN)
-    ) {
-      DBConnection().query(
-        formatString(SQLQueries.DELETE_QUIZ, [
-          { key: 'table', value: req.params.quizID },
-        ])
-      );
-      DBConnection().query(
-        formatString(SQLQueries.DELETE_QUIZ_ENTRY, [
-          { key: 'table', value: req.params.quizID },
-        ])
-      );
-
-      res.status(200).end('OK!');
-    } else {
-      res.status(403).end('Unauthorised');
-    }
-  }
-);
-
-webApp.post('/accounts/register', async (req, res) => {
-  if (req.body.username && req.body.password && req.body.email) {
+app.post('/accounts/register', async (req, res) => {
+  if ((req.body.username, req.body.password, req.body.email)) {
     res
       .status(200)
       .end(
-        await registerUser(req.body.username, req.body.password, req.body.email)
+        await register(req.body.username, req.body.password, req.body.email)
       );
   } else {
-    res.status(422).end('BAD DATA');
+    res.status(400).end('Bad Data!');
   }
 });
 
-webApp.post('/accounts/login', async (req, res) => {
+app.post('/accounts/login', (req, res) => {
   if (req.body.username && req.body.password) {
-    res.status(200).end(await loginUser(req.body.username, req.body.password));
+    login(req.body.username, req.body.password, res);
   } else {
-    res.status(422).end('BAD DATA');
+    res.status(400).end('Bad Data!');
   }
 });
 
-webApp.get('/session/exists', (req, res) => {
-  if (req.query.session) {
-    DBConnection().query(
-      formatString(SQLQueries.GET_SESSION, [
-        { key: 'session', value: String(req.query.session) },
-      ]),
-      (_, val) => {
-        res.status(200).json(val);
+app.post('/lz-string/encode', (req, res) => {
+  res.status(200).json({
+    data: lzs.compressToBase64(JSON.stringify(req.body)),
+  });
+});
+
+app.post('/lz-string/decode', (req, res) => {
+  res.status(200).end(lzs.decompressFromBase64(req.body.data));
+});
+
+// Authed
+app.get(
+  '/auth/quizzes',
+  passport.authenticate('basic', { session: false }),
+  async (req, res) => {
+    if (req.query.username) {
+      if (sessionValid(String(req.query.username), SessionType.BASIC)) {
+        const { data } = await SupaBaseClient.from('quizzes').select();
+        res.status(200).json(data);
+      } else {
+        res.status(401).end('Unauthorized');
       }
-    );
-  } else {
-    res.status(422).end('BAD DATA');
+    } else {
+      res.status(400).end('Username missing!');
+    }
   }
-});
+);
 
-webApp.get('/accounts/exists/:username', (req, res) => {
-  DBConnection()
-    .promise()
-    .query(
-      formatString(SQLQueries.USERNAME_EXITS, [
-        { key: 'user', value: req.params.username },
-      ])
-    )
-    .then((val) => res.status(200).json(JSON.parse(JSON.stringify(val))[0][0]));
-});
+app.get(
+  '/auth/quizzes/search/:param',
+  passport.authenticate('basic', { session: false }),
+  async (req, res) => {
+    if (req.query.username && req.query.search) {
+      if (sessionValid(String(req.query.username), SessionType.BASIC)) {
+        const { data } = await SupaBaseClient.from('quizzes')
+          .select()
+          .textSearch('name', `'${req.query.search}'`);
+
+        res.status(200).json(data);
+      } else {
+        res.status(401).end('Unauthorized');
+      }
+    } else {
+      res.status(400).end('Search or Username Missing');
+    }
+  }
+);
+
+app.post(
+  '/auth/submit/quiz/:id',
+  passport.authenticate('basic', { session: false }),
+  async (req, res) => {
+    if (req.query.username) {
+      if (sessionValid(String(req.query.username), SessionType.BASIC)) {
+        const data = req.body;
+        const userSession = getUserSession(String(req.query.username));
+
+        data.username = req.query.username;
+        data.email = userSession.get('email');
+
+        await SupaBaseClient.from(req.params.id).insert(data);
+        res.status(200).end('Submitted');
+      } else {
+        res.status(401).end('Unauthorised');
+      }
+    } else {
+      res.status(400).end('Username Missing');
+    }
+  }
+);
+
+app.post(
+  '/auth/new/quiz',
+  passport.authenticate('basic', { session: false }),
+  async (req, res) => {
+    if (req.body.username) {
+      if (sessionValid(req.body.username, SessionType.CREATOR)) {
+        const quiz = JSON.parse(
+          lzs.decompressFromBase64(String(req.body.data))
+        );
+
+        const quizID = quiz.metadata.id;
+        const needs_auth = quiz.metadata.needsAuth;
+        const name = quiz.metadata.name;
+
+        newTableFromQuiz(quiz);
+        await SupaBaseClient.from('quizzes').insert({
+          quizid: quizID,
+          name: name,
+          needs_auth: needs_auth,
+          data: req.body.data,
+        });
+
+        res.status(200).end('Created!');
+      } else {
+        res.status(401).end('Unauthorized');
+      }
+    } else {
+      res.status(400).end('Username not entered');
+    }
+  }
+);
+
+app.delete(
+  '/auth/delete/quiz',
+  passport.authenticate('basic', { session: false }),
+  async (req, res) => {
+    if (req.body.username && req.body.password && req.body.quizid) {
+      if (
+        req.body.username == process.env.ADMIN_USER &&
+        req.body.password == process.env.ADMIN_PASS
+      ) {
+        await SupaBaseClient.from('quizzes')
+          .delete()
+          .eq('quizid', req.body.quizid);
+        await SupaBaseClient.rpc('delete_quiz', { quizname: req.body.quizid });
+        res.status(200).end('Deleted');
+      } else {
+        res.status(401).end('Unauthorized');
+      }
+    } else {
+      res.status(400).end('Credentials / Quiz ID not entered');
+    }
+  }
+);
 
 // Server
-webApp.listen(process.env.PORT || 3000, () => {
+app.listen(process.env.PORT || 3000, () => {
   console.log(`Express Server running on port, ${process.env.PORT || 3000}`);
 });
-
-// Cron Expire
-cron.schedule('0 * * * * *', () => refreshSessions());
