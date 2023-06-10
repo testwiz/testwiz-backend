@@ -131,3 +131,4 @@ dist
 
 # Custom
 *.txt
+.src_old
