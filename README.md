@@ -1,1 +1,1 @@
-# wizquiz
+# TestWiz
