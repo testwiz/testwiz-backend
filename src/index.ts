@@ -150,7 +150,7 @@ app.post('/lz-string/encode', (req, res) => {
 });
 
 app.post('/lz-string/decode', (req, res) => {
-  res.status(200).end(lzs.decompressFromBase64(req.body.data));
+  res.status(200).json(lzs.decompressFromBase64(req.body.data));
 });
 
 // Authed
